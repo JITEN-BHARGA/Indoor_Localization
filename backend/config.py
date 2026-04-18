@@ -11,7 +11,12 @@ MQTT_HOST = os.getenv("MQTT_HOST")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
-MQTT_TOPIC = os.getenv("MQTT_TOPIC", "esp32/rssi")
+
+# Result topic wildcard - backend listens here
+MQTT_RESULT_TOPIC = os.getenv("MQTT_RESULT_TOPIC", "indoor/esp/+/result")
+
+# Command topic prefix - backend publishes to indoor/esp/{device_id}/command
+MQTT_COMMAND_TOPIC_PREFIX = os.getenv("MQTT_COMMAND_TOPIC_PREFIX", "indoor/esp")
 
 MODEL_PATH = os.getenv(
     "MODEL_PATH",
@@ -30,7 +35,6 @@ REFERENCE_FINGERPRINT_PATH = os.getenv(
 
 LOW_CONFIDENCE_THRESHOLD = float(os.getenv("LOW_CONFIDENCE_THRESHOLD", "0.60"))
 MIN_COMMON_MACS = int(os.getenv("MIN_COMMON_MACS", "1"))
-API_TOKEN = os.getenv("API_TOKEN", "replace-me")
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL not found in .env")

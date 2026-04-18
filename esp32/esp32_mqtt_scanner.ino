@@ -1,6 +1,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+#include <ArduinoJson.h>
 
 // WIFI CONFIG
 const char* WIFI_SSID = "Galaxy A04s E5D9";
@@ -11,19 +12,31 @@ const char* MQTT_HOST = "71d42413ef0d4e608f50a83715ac6ba7.s1.eu.hivemq.cloud";
 const int MQTT_PORT = 8883;
 const char* MQTT_USERNAME = "jb_8115";
 const char* MQTT_PASSWORD = "Jiten@333";
-const char* MQTT_TOPIC = "esp32/rssi";
 
-// DEVICE INFO
-const char* OBJECT_ID = "bag_01";
+// ===============================
+// Unique ESP device identity
+// Must match esp_devices.device_id in DB
+// ===============================
 const char* DEVICE_ID = "esp32_01";
 
+// Topics
+String commandTopic;
+String resultTopic;
+
+// Secure client
 WiFiClientSecure secureClient;
-PubSubClient client(secureClient);
+PubSubClient mqttClient(secureClient);
 
+// Last command context
+String currentRequestId = "";
+String currentObjectId = "";
+
+// ===============================
+// Connect WiFi
+// ===============================
 void connectWiFi() {
-  if (WiFi.status() == WL_CONNECTED) return;
-
-  Serial.print("Connecting WiFi");
+  Serial.println("Connecting to WiFi...");
+  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   while (WiFi.status() != WL_CONNECTED) {
@@ -31,89 +44,168 @@ void connectWiFi() {
     Serial.print(".");
   }
 
-  Serial.println("\nWiFi Connected!");
-  Serial.print("ESP32 IP: ");
+  Serial.println("\nWiFi connected");
+  Serial.print("IP: ");
   Serial.println(WiFi.localIP());
 }
 
+// ===============================
+// MQTT callback
+// ===============================
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  Serial.println("MQTT message received");
+
+  String message;
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+
+  Serial.print("Topic: ");
+  Serial.println(topic);
+  Serial.print("Payload: ");
+  Serial.println(message);
+
+  StaticJsonDocument<512> doc;
+  DeserializationError error = deserializeJson(doc, message);
+
+  if (error) {
+    Serial.print("JSON parse failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  const char* command = doc["command"];
+  const char* request_id = doc["request_id"];
+  const char* object_id = doc["object_id"];
+
+  if (!command || !request_id || !object_id) {
+    Serial.println("Invalid command payload");
+    return;
+  }
+
+  if (String(command) == "scan") {
+    currentRequestId = String(request_id);
+    currentObjectId = String(object_id);
+
+    Serial.println("Scan command received");
+    Serial.print("Request ID: ");
+    Serial.println(currentRequestId);
+    Serial.print("Object ID: ");
+    Serial.println(currentObjectId);
+
+    performAndPublishScan();
+  }
+}
+
+// ===============================
+// Connect MQTT
+// ===============================
 void connectMQTT() {
-  secureClient.setInsecure();
-  client.setServer(MQTT_HOST, MQTT_PORT);
-  client.setBufferSize(2048);   // IMPORTANT
+  while (!mqttClient.connected()) {
+    Serial.println("Connecting to MQTT...");
 
-  while (!client.connected()) {
-    Serial.print("Connecting MQTT to ");
-    Serial.print(MQTT_HOST);
-    Serial.print(":");
-    Serial.println(MQTT_PORT);
+    String clientId = "ESP32-" + String(DEVICE_ID) + "-" + String(random(1000, 9999));
 
-    bool ok = client.connect(DEVICE_ID, MQTT_USERNAME, MQTT_PASSWORD);
+    if (mqttClient.connect(clientId.c_str(), MQTT_USERNAME, MQTT_PASSWORD)) {
+      Serial.println("MQTT connected");
 
-    if (ok) {
-      Serial.println("MQTT Connected!");
-      Serial.print("MQTT Buffer Size: ");
-      Serial.println(client.getBufferSize());
+      if (mqttClient.subscribe(commandTopic.c_str())) {
+        Serial.print("Subscribed to: ");
+        Serial.println(commandTopic);
+      } else {
+        Serial.println("MQTT subscribe failed");
+      }
+
     } else {
-      Serial.print("Failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" retrying...");
+      Serial.print("MQTT connect failed, rc=");
+      Serial.println(mqttClient.state());
       delay(2000);
     }
   }
 }
 
-String buildPayload() {
-  int n = WiFi.scanNetworks(false, true);
+// ===============================
+// Perform WiFi scan and publish
+// ===============================
+void performAndPublishScan() {
+  Serial.println("Starting WiFi scan...");
 
-  // only send top 5 strongest networks
-  int limit = n;
-  if (limit > 5) limit = 5;
+  int networkCount = WiFi.scanNetworks(false, true);
 
-  String payload = "{";
-  payload += "\"object_id\":\"" + String(OBJECT_ID) + "\",";
-  payload += "\"device_id\":\"" + String(DEVICE_ID) + "\",";
-  payload += "\"scan_data\":[";
-
-  for (int i = 0; i < limit; i++) {
-    payload += "{";
-    payload += "\"mac_address\":\"" + WiFi.BSSIDstr(i) + "\",";
-    payload += "\"rssi\":" + String(WiFi.RSSI(i));
-    payload += "}";
-
-    if (i != limit - 1) payload += ",";
+  if (networkCount < 0) {
+    Serial.println("WiFi scan failed");
+    return;
   }
 
-  payload += "]}";
-  return payload;
+  StaticJsonDocument<8192> doc;
+  doc["request_id"] = currentRequestId;
+  doc["object_id"] = currentObjectId;
+  doc["device_id"] = DEVICE_ID;
+
+  JsonArray scanData = doc.createNestedArray("scan_data");
+
+  for (int i = 0; i < networkCount; i++) {
+    JsonObject item = scanData.createNestedObject();
+    item["mac_address"] = WiFi.BSSIDstr(i);
+    item["rssi"] = WiFi.RSSI(i);
+    item["ssid"] = WiFi.SSID(i);
+    item["channel"] = WiFi.channel(i);
+  }
+
+  char buffer[8192];
+  size_t payloadSize = serializeJson(doc, buffer);
+
+  Serial.println("Publishing scan result...");
+  Serial.print("Topic: ");
+  Serial.println(resultTopic);
+  Serial.print("Payload size: ");
+  Serial.println(payloadSize);
+
+  bool ok = mqttClient.publish(resultTopic.c_str(), buffer, payloadSize);
+
+  if (ok) {
+    Serial.println("Scan result published successfully");
+  } else {
+    Serial.println("Failed to publish scan result");
+  }
+
+  WiFi.scanDelete();
 }
 
+// ===============================
+// Setup
+// ===============================
 void setup() {
   Serial.begin(115200);
   delay(1000);
 
+  randomSeed(micros());
+
+  commandTopic = "indoor/esp/" + String(DEVICE_ID) + "/command";
+  resultTopic = "indoor/esp/" + String(DEVICE_ID) + "/result";
+
   connectWiFi();
+
+  secureClient.setInsecure();
+
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+  mqttClient.setCallback(mqttCallback);
+  mqttClient.setBufferSize(16384);
+
   connectMQTT();
 }
 
+// ===============================
+// Loop
+// ===============================
 void loop() {
-  connectWiFi();
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+  }
 
-  if (!client.connected()) {
+  if (!mqttClient.connected()) {
     connectMQTT();
   }
 
-  client.loop();
-
-  String payload = buildPayload();
-
-  Serial.print("Payload length: ");
-  Serial.println(payload.length());
-  Serial.println(payload);
-
-  bool sent = client.publish(MQTT_TOPIC, payload.c_str());
-
-  Serial.print("Publish status: ");
-  Serial.println(sent ? "SUCCESS" : "FAILED");
-
-  delay(5000);
+  mqttClient.loop();
 }

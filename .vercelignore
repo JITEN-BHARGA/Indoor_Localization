@@ -1,0 +1,6 @@
+backend/
+api/
+model_training/
+scripts/
+database/
+requirements.txt

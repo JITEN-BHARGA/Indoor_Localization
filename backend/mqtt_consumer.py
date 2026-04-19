@@ -120,3 +120,13 @@ def publish_scan_command(device_id: str, request_id: str, object_id: str):
 
     mqtt_client.publish(topic, json.dumps(payload))
     print(f"[MQTT] Published to {topic}")
+
+def stop_mqtt():
+    global mqtt_client
+    if mqtt_client:
+        try:
+            mqtt_client.loop_stop()
+            mqtt_client.disconnect()
+            print("[MQTT] Disconnected")
+        except Exception as e:
+            print("[MQTT] Shutdown error:", e)

@@ -133,6 +133,77 @@ Vercel should not run a persistent MQTT subscriber. Use one of these patterns:
 }
 ```
 
+# 📍 IoT Indoor Localization System
+
+## 📌 Project Overview
+This project is an Indoor Localization System that uses Wi-Fi RSSI fingerprinting and Machine Learning to predict device location indoors.
+
+## 🧠 Core Idea
+Indoor GPS doesn't work effectively, so we use Wi-Fi RSSI Fingerprinting where each location has a unique signal pattern.
+
+## 🏗️ System Architecture
+ESP32 → Wi-Fi Scan → MQTT → FastAPI → ML Model → PostgreSQL → Dashboard
+
+## 🔄 Workflow
+1. ESP32 scans Wi-Fi signals
+2. Data sent via MQTT
+3. Backend processes data
+4. ML model predicts location
+5. Data stored in PostgreSQL
+6. Frontend displays results
+
+## 🤖 Machine Learning
+- Model: MLPClassifier
+- Pipeline: StandardScaler → MLP
+- Features: RSSI values per MAC address
+- Missing values filled with -100
+
+## 📊 Dataset
+Columns:
+- Location
+- Sequence Number
+- SSID
+- MAC Address
+- RSSI
+
+## 🧩 Backend
+- FastAPI
+- Handles ingestion & prediction
+
+## 🗄️ Database
+- PostgreSQL
+- Stores scans and predictions
+
+## 🌐 Frontend
+- Next.js dashboard
+- Displays real-time data
+
+## 📡 IoT Device
+- ESP32 scans and sends RSSI data
+
+## ⚙️ Environment Variables
+DATABASE_URL=your_db_url
+MODEL_PATH=path_to_model
+FINGERPRINT_PATH=path_to_csv
+
+## 🚀 Features
+- Real-time tracking
+- Full-stack system
+- ML-powered predictions
+
+## ⚠️ Limitations
+- Signal noise affects accuracy
+- Requires retraining on environment change
+
+## 🔮 Future Scope
+- Deep Learning models
+- BLE support
+- Mobile app integration
+
+## 🧾 Summary
+An end-to-end IoT + ML based indoor localization system.
+
+
 ## Notes
 
 - This repo is designed to be simple and easy to understand for a course project.

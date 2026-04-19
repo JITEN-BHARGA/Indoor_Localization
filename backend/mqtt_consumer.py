@@ -1,169 +1,122 @@
 import json
 import ssl
 import threading
-from collections import defaultdict
+import os
+
+from dotenv import load_dotenv
 import paho.mqtt.client as mqtt
 
-from backend.config import (
-    MQTT_HOST,
-    MQTT_PORT,
-    MQTT_USERNAME,
-    MQTT_PASSWORD,
-    MQTT_RESULT_TOPIC,
-    MQTT_COMMAND_TOPIC_PREFIX,
-)
-from backend.hybrid_predictor import hybrid_predict
 from backend.db import (
     save_raw_scan,
     save_prediction,
-    mark_device_response_received,
-    get_scan_request_status,
-    get_raw_scans_for_request,
     complete_scan_request,
-    touch_esp_device,
 )
+
+# ✅ correct predictor import
+from backend.hybrid_predictor import hybrid_predict
+
+load_dotenv()
+
+MQTT_HOST = os.getenv("MQTT_HOST")
+MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
+
+MQTT_RESULT_TOPIC = os.getenv("MQTT_RESULT_TOPIC")
+MQTT_COMMAND_TOPIC_PREFIX = os.getenv("MQTT_COMMAND_TOPIC_PREFIX")
 
 mqtt_client = None
 
 
+# ----------------------------
+# MQTT READY CHECK
+# ----------------------------
 def is_mqtt_ready():
-    global mqtt_client
     return mqtt_client is not None and mqtt_client.is_connected()
 
 
-def merge_scan_payloads(scan_payloads: list[dict]) -> dict:
-    if not scan_payloads:
-        raise ValueError("No scan payloads to merge")
-
-    object_id = scan_payloads[0]["object_id"]
-    rssi_map = defaultdict(list)
-
-    for payload in scan_payloads:
-        for item in payload.get("scan_data", []):
-            mac = item["mac_address"].strip().upper()
-            rssi_map[mac].append(float(item["rssi"]))
-
-    merged_scan_data = []
-    for mac, values in rssi_map.items():
-        avg_rssi = sum(values) / len(values)
-        merged_scan_data.append({
-            "mac_address": mac,
-            "rssi": int(round(avg_rssi))
-        })
-
-    return {
-        "object_id": object_id,
-        "device_id": "merged",
-        "scan_data": merged_scan_data,
-    }
-
-
-def try_finalize_request(request_id: str):
-    status = get_scan_request_status(request_id)
-    if not status:
-        return
-
-    if status["expected_device_count"] == 0:
-        return
-
-    if status["received_device_count"] < status["expected_device_count"]:
-        return
-
-    existing_result = get_raw_scans_for_request(request_id)
-    if not existing_result:
-        return
-
-    merged_payload = merge_scan_payloads(existing_result)
-    result = hybrid_predict(merged_payload)
-    save_prediction(result, request_id=request_id)
-    complete_scan_request(request_id)
-
-
-def on_connect(client, userdata, flags, reason_code, properties=None):
-    print(f"[MQTT] Connected rc={reason_code}")
+# ----------------------------
+# ON CONNECT
+# ----------------------------
+def on_connect(client, userdata, flags, rc):
+    print(f"[MQTT] Connected rc={rc}")
     client.subscribe(MQTT_RESULT_TOPIC)
     print(f"[MQTT] Subscribed to {MQTT_RESULT_TOPIC}")
 
 
+# ----------------------------
+# ON MESSAGE
+# ----------------------------
 def on_message(client, userdata, msg):
     try:
-        payload = json.loads(msg.payload.decode("utf-8"))
+        payload = json.loads(msg.payload.decode())
         print("[MQTT] Message received:", payload)
 
         request_id = payload.get("request_id")
-        object_id = payload["object_id"]
-        device_id = payload.get("device_id", "unknown")
+        device_id = payload.get("device_id")
+        object_id = payload.get("object_id")
 
-        save_raw_scan(
-            request_id=request_id,
-            object_id=object_id,
-            device_id=device_id,
-            payload=payload,
-        )
+        if not request_id or not device_id:
+            print("[MQTT] Invalid payload")
+            return
 
-        touch_esp_device(device_id)
+        # ✅ FIXED: correct parameters
+        save_raw_scan(request_id, object_id, device_id, payload)
 
-        if request_id:
-            mark_device_response_received(request_id, device_id)
-            try_finalize_request(request_id)
-        else:
-            result = hybrid_predict(payload)
-            save_prediction(result)
+        # ✅ correct prediction function
+        result = hybrid_predict(payload)
 
-        print("[MQTT] Processed payload successfully")
+        # ✅ FIXED: correct call format
+        save_prediction(result, request_id=request_id, device_id=device_id)
+
+        # Mark complete
+        complete_scan_request(request_id)
+
+        print("[MQTT] Processed successfully")
 
     except Exception as e:
         print("[MQTT] Error:", e)
 
 
-def start_mqtt_consumer():
+# ----------------------------
+# START MQTT
+# ----------------------------
+def start_mqtt():
     global mqtt_client
 
-    try:
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    mqtt_client = mqtt.Client()
 
-        client.tls_set(cert_reqs=ssl.CERT_NONE)
-        client.tls_insecure_set(True)
+    mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 
-        client.on_connect = on_connect
-        client.on_message = on_message
+    mqtt_client.tls_set(cert_reqs=ssl.CERT_NONE)
+    mqtt_client.tls_insecure_set(True)
 
-        print(f"[MQTT] Connecting to {MQTT_HOST}:{MQTT_PORT}")
-        client.connect(MQTT_HOST, MQTT_PORT, 60)
-        client.loop_start()
+    mqtt_client.on_connect = on_connect
+    mqtt_client.on_message = on_message
 
-        mqtt_client = client
-        print("[MQTT] Client started successfully")
+    print(f"[MQTT] Connecting to {MQTT_HOST}:{MQTT_PORT}")
+    mqtt_client.connect(MQTT_HOST, MQTT_PORT, 60)
 
-    except Exception as e:
-        mqtt_client = None
-        print(f"[MQTT] Startup failed: {e}")
+    mqtt_client.loop_forever()
 
 
+def start_mqtt_in_background():
+    thread = threading.Thread(target=start_mqtt)
+    thread.daemon = True
+    thread.start()
+
+
+# ----------------------------
+# PUBLISH COMMAND
+# ----------------------------
 def publish_scan_command(device_id: str, request_id: str, object_id: str):
-    global mqtt_client
-
-    if not is_mqtt_ready():
-        raise RuntimeError("MQTT client is not started or not connected")
-
     topic = f"{MQTT_COMMAND_TOPIC_PREFIX}/{device_id}/command"
+
     payload = {
         "request_id": request_id,
         "object_id": object_id,
         "command": "scan",
     }
 
-    info = mqtt_client.publish(topic, json.dumps(payload), qos=1)
-    info.wait_for_publish()
-
-    print(f"[MQTT] Published scan command to {topic}: {payload}")
-    print(f"[MQTT] publish mid={info.mid}, rc={info.rc}, is_published={info.is_published()}")
-
-    if info.rc != mqtt.MQTT_ERR_SUCCESS:
-        raise RuntimeError(f"MQTT publish failed with rc={info.rc}")
-
-
-def start_mqtt_in_background():
-    thread = threading.Thread(target=start_mqtt_consumer, daemon=True)
-    thread.start()
+    mqtt_client.publish(topic, json.dumps(payload))
+    print(f"[MQTT] Published to {topic}")

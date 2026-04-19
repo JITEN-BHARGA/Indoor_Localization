@@ -54,3 +54,8 @@ class ScanRequestResponse(BaseModel):
     expected_device_count: int = 0
     received_device_count: int = 0
     device_statuses: List[dict] = []
+
+class CreateEspDeviceBody(BaseModel):
+    device_id: str
+    device_name: str
+    is_active: bool = True

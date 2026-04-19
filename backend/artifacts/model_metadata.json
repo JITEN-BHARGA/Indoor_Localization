@@ -1,0 +1,17 @@
+{
+  "accuracy": 0.88,
+  "final_training_loss": 0.3440273773455696,
+  "best_validation_accuracy": 0.9333333333333333,
+  "class_names": [
+    "CEP102",
+    "CEP104",
+    "CEP105",
+    "CEP106",
+    "CEP107",
+    "CEP108",
+    "CEP110",
+    "CEP205"
+  ],
+  "num_features": 71,
+  "num_samples": 197
+}

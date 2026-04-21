@@ -1,0 +1,19 @@
+{
+  "accuracy": 0.94,
+  "cv_accuracy_mean": 0.9446153846153846,
+  "cv_accuracy_std": 0.04289529781481834,
+  "model_type": "RandomForestClassifier",
+  "class_names": [
+    "CEP102",
+    "CEP104",
+    "CEP105",
+    "CEP106",
+    "CEP107",
+    "CEP108",
+    "CEP110",
+    "CEP205"
+  ],
+  "num_features": 71,
+  "num_samples": 197,
+  "num_reference_sequences": 197
+}

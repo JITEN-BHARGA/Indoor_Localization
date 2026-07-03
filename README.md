@@ -55,6 +55,14 @@ NEXT_PUBLIC_API_BASE=
 
 and the app will use relative `/api/...` requests.
 
+## Frontend Codebase
+
+For frontend code github link, set:
+
+```env
+https://github.com/JITEN-BHARGA/Localization_Dashboard
+```
+
 ## Database setup
 
 Use Supabase Postgres or Neon Postgres for deployment.
